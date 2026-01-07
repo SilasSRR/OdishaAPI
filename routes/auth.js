@@ -67,29 +67,12 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User
-      .findOne({ email: email.toLowerCase() })
-      .select('+passwordHash provider email');
-
-    if (!user) {
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user || !user.passwordHash) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    if (!user.passwordHash) {
-      return res.status(400).json({
-        message: 'This account has no password set. Please reset password or re-register.',
-      });
-    }
-
-    if (!password) {
-      return res.status(400).json({ message: 'Password missing' });
-    }
-
-    const isMatch = await bcrypt.compare(String(password), user.passwordHash);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
