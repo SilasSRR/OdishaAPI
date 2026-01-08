@@ -2,13 +2,10 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 
 const router = express.Router();
 
-// Google OAuth client
-const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
 // Helper to generate JWT
 function generateToken(user) {
@@ -67,7 +64,10 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const emailNorm = String(email).trim().toLowerCase();
+
+    const user = await User.findOne({ email: emailNorm });
+
     if (!user || !user.passwordHash) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -84,7 +84,7 @@ router.post('/login', async (req, res) => {
       user: {
         id: user._id,
         email: user.email,
-        provider: user.provider,
+        provider: 'local',
       },
     });
   } catch (err) {
@@ -92,6 +92,7 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // GET /api/auth/me (optional)
 router.get('/me', async (req, res) => {
@@ -122,67 +123,6 @@ router.get('/me', async (req, res) => {
 // =====================
 
 // POST /api/auth/google
-router.post('/google', async (req, res) => {
-  try {
-    const { idToken } = req.body;
-
-    if (!idToken) {
-      return res.status(400).json({ message: 'Missing idToken' });
-    }
-
-    // Verify token with Google
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_WEB_CLIENT_ID,
-    });
-
-    const payload = ticket.getPayload();
-    const googleId = payload.sub;
-    const email = payload.email;
-    const emailVerified = payload.email_verified;
-    const name = payload.name;
-    const picture = payload.picture;
-
-    if (!email || !emailVerified) {
-      return res.status(400).json({ message: 'Email not verified by Google' });
-    }
-
-    let user = await User.findOne({ email: email.toLowerCase() });
-
-    if (!user) {
-      // Create new Google user
-      user = await User.create({
-        email: email.toLowerCase(),
-        googleId,
-        provider: 'google',
-      });
-    } else {
-      // Link Google info if not already linked
-      if (!user.googleId) {
-        user.googleId = googleId;
-      }
-      if (!user.provider.includes('google')) {
-        user.provider = user.provider === 'local' ? 'local-google' : user.provider;
-      }
-      await user.save();
-    }
-
-    const token = generateToken(user);
-
-    res.json({
-      token,
-      user: {
-        id: user._id,
-        email: user.email,
-        provider: user.provider,
-        name: name || user.email,
-        picture,
-      },
-    });
-  } catch (err) {
-    console.error('Google auth error', err);
-    res.status(401).json({ message: 'Invalid Google token' });
-  }
-});
+// (Removed Google auth routes as per recent edits)
 
 module.exports = router;

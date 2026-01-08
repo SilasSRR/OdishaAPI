@@ -10,21 +10,14 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    // For local (email/password) users
     passwordHash: {
-      type: String, // not required – can be empty for Google users
-    },
-    // For Google login
-    googleId: {
       type: String,
-    },
-    provider: {
-      type: String,
-      default: 'local', // 'local', 'google', 'local-google', etc.
+      required: true,
     },
   },
   { timestamps: true }
 );
+
 
 const User = mongoose.model('User', userSchema);
 
