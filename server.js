@@ -51,6 +51,7 @@ cron.schedule("*/30 * * * *", () => {
 
   exec(
     "node scripts/syncYoutubeByYears.js --years=2026 --excludeShorts=false",
+    { cwd: __dirname },
     (err, stdout, stderr) => {
       if (err) {
         console.error("Sync error:", err);
@@ -60,5 +61,6 @@ cron.schedule("*/30 * * * *", () => {
     }
   );
 });
+
 
 
