@@ -5,7 +5,7 @@ const Video = require("../models/Video");
 
 const API_KEY = process.env.YT_API_KEY;
 const CHANNEL_ID = process.env.YT_CHANNEL_ID;
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 
 if (!API_KEY || !CHANNEL_ID || !MONGODB_URI) {
   console.error("Missing env vars. Need YT_API_KEY, YT_CHANNEL_ID, MONGODB_URI");
