@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cron = require("node-cron");
+
 
 const authRoutes = require('./routes/auth');
 const videosRoutes = require("./routes/videos");
@@ -39,4 +41,24 @@ mongoose
     console.error('MongoDB connection error', err);
     process.exit(1);
   });
+
+// ---------------- YouTube Auto-Sync Cron Job ----------------
+
+const { exec } = require("child_process");
+
+cron.schedule("*/30 * * * *", () => {
+  console.log("Running YouTube auto-sync...");
+
+  exec(
+    "node scripts/syncYoutubeByYears.js --years=2026 --excludeShorts=false",
+    (err, stdout, stderr) => {
+      if (err) {
+        console.error("Sync error:", err);
+        return;
+      }
+      console.log(stdout);
+    }
+  );
+});
+
 
