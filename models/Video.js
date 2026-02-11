@@ -17,7 +17,7 @@ const videoSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-videoSchema.index({ youtubeId: 1 }, { unique: true });
+
 videoSchema.index({ category: 1, qtDate: 1, publishedAt: -1, _id: -1 });
 
 module.exports = mongoose.model("Video", videoSchema);
