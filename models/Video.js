@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const videoSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
-    youtubeId: { type: String, required: true, trim: true },
+    youtubeId: { type: String, required: true, trim: true, unique: true, index: true },
     category: { type: String, required: true, enum: ["QT", "Live", "Other"] },
 
     // NEW: QT day grouping
@@ -17,6 +17,7 @@ const videoSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+videoSchema.index({ youtubeId: 1 }, { unique: true });
 videoSchema.index({ category: 1, qtDate: 1, publishedAt: -1, _id: -1 });
 
 module.exports = mongoose.model("Video", videoSchema);

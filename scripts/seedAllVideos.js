@@ -9,9 +9,9 @@ const FILES = [
     // "qt-2021.seed.json",
     // "qt-2022.seed.json",
     // "qt-2023.seed.json",
-    // "qt-2024.seed.json",
-    // "qt-2025.seed.json",
-    "live.seed.json",
+    "bread-of-life-2026.seed.json",
+    // "bread-of-life-2025.seed.json",
+    // "live.seed.json",
     // "other.seed.json",
 ];
 
@@ -25,19 +25,21 @@ async function main() {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("MongoDB connected");
 
-    // ✅ One-time cleanup during dev:
-    // Deletes old mock stuff too.
+    // ================================
+    // STEP 1: DELETE existing 2026 data
+    // ================================
+    const deleteResult = await Video.deleteMany({
+        category: "QT",
+        qtDate: /^2026-/,   // deletes only 2026 Bread of Life
+    });
 
-    await Video.deleteMany({});
+    console.log(
+        `🗑️ Deleted ${deleteResult.deletedCount} Bread-of-Life 2026 videos`
+    );
 
-    // await Video.deleteMany({
-    //     $or: [
-    //         { category: "QT", qtDate: /^2025-/ },
-    //         { category: "Live" },
-    //         { category: "Other" },
-    //     ],
-    // });
-    console.log("Deleted ALL existing videos");
+    // ================================
+    // STEP 2: INSERT fresh seed data
+    // ================================
 
     let total = 0;
 
