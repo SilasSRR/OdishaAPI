@@ -23,13 +23,16 @@ function generateToken(user) {
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { fullName, email, password } = req.body;
 
-    if (!email || !password || password.length < 4) {
-      return res.status(400).json({ message: 'Invalid email or password' });
+    const fullNameNorm = String(fullName || "").trim().replace(/\s+/g, " ");
+    const emailNorm = String(email || "").trim().toLowerCase();
+
+    if (!fullName || !email || !password || password.length < 4) {
+      return res.status(400).json({ message: "Invalid name, email or password" });
     }
 
-    const existing = await User.findOne({ email: email.toLowerCase() });
+    const existing = await User.findOne({ email: emailNorm });
     if (existing) {
       return res.status(409).json({ message: 'Email already in use' });
     }
@@ -38,9 +41,10 @@ router.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     const user = await User.create({
-      email: email.toLowerCase(),
+      fullName: fullNameNorm,
+      email: emailNorm,
       passwordHash,
-      provider: 'local',
+      provider: "local",
     });
 
     const token = generateToken(user);
@@ -50,9 +54,11 @@ router.post('/register', async (req, res) => {
       user: {
         id: user._id,
         email: user.email,
+        fullName: user.fullName,
         provider: user.provider,
       },
     });
+
   } catch (err) {
     console.error('Register error', err);
     res.status(500).json({ message: 'Server error' });
@@ -64,7 +70,7 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const emailNorm = String(email).trim().toLowerCase();
+    const emailNorm = String(email || "").trim().toLowerCase();
 
     const user = await User.findOne({ email: emailNorm });
 
@@ -84,9 +90,11 @@ router.post('/login', async (req, res) => {
       user: {
         id: user._id,
         email: user.email,
-        provider: 'local',
+        fullName: user.fullName,
+        provider: user.provider,
       },
     });
+
   } catch (err) {
     console.error('Login error', err);
     res.status(500).json({ message: 'Server error' });
@@ -106,12 +114,21 @@ router.get('/me', async (req, res) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.userId).select('_id email provider');
+    const user = await User.findById(decoded.userId).select("_id email provider fullName");
+
     if (!user) {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    res.json({ user: { id: user._id, email: user.email, provider: user.provider } });
+    res.json({
+      user: {
+        id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        provider: user.provider,
+      },
+    });
+
   } catch (err) {
     console.error('Me error', err);
     res.status(401).json({ message: 'Invalid token' });

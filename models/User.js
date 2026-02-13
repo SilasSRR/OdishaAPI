@@ -1,8 +1,16 @@
 // models/User.js
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
+    fullName: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "",
+      minlength: 2,
+      maxlength: 80,
+    },
     email: {
       type: String,
       required: true,
@@ -14,11 +22,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    provider: {
+      type: String,
+      default: "local",
+      enum: ["local"],
+    },
   },
   { timestamps: true }
 );
 
-
-const User = mongoose.model('User', userSchema);
-
+const User = mongoose.model("User", userSchema);
 module.exports = User;
