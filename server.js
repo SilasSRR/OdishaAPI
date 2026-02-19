@@ -9,6 +9,8 @@ const cron = require("node-cron");
 const authRoutes = require('./routes/auth');
 const videosRoutes = require("./routes/videos");
 const qtRoutes = require("./routes/qt");
+const completedRoutes = require("./routes/completed");
+const bookmarkRoutes = require("./routes/bookmarks");
 
 const app = express();
 
@@ -20,6 +22,8 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use("/api/videos", videosRoutes);
 app.use("/api/qt", qtRoutes);
+app.use("/api/completed", completedRoutes);
+app.use("/api/bookmarks", bookmarkRoutes);
 
 // Health check
 app.get('/', (req, res) => {
