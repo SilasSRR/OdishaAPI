@@ -101,24 +101,13 @@ router.post('/login', async (req, res) => {
   }
 });
 
+const { requireAuth } = require("../middleware/auth");
 
-// GET /api/auth/me (optional)
-router.get('/me', async (req, res) => {
+// GET /api/auth/me
+router.get("/me", requireAuth, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace('Bearer ', '');
-
-    if (!token) {
-      return res.status(401).json({ message: 'No token' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    const user = await User.findById(decoded.userId).select("_id email provider fullName profilePhotoUrl");
-
-    if (!user) {
-      return res.status(401).json({ message: 'User not found' });
-    }
+    const user = await User.findById(req.userId).select("_id email provider fullName profilePhotoUrl");
+    if (!user) return res.status(401).json({ message: "User not found" });
 
     res.json({
       user: {
@@ -129,10 +118,10 @@ router.get('/me', async (req, res) => {
         profilePhotoUrl: user.profilePhotoUrl || "",
       },
     });
-
+    
   } catch (err) {
-    console.error('Me error', err);
-    res.status(401).json({ message: 'Invalid token' });
+    console.error("Me error", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 

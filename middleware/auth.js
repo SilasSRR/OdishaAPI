@@ -25,11 +25,11 @@ function requireAuth(req, res, next) {
     req.userEmail = decoded.email;
     next();
   } catch (e) {
-    console.log("[AUTH] JWT verify failed:", e.message);
-    console.log("[AUTH] Authorization header was:", authHeader);
-    console.log("[AUTH] Token first 20 chars:", token.slice(0, 20));
-    return res.status(401).json({ message: "Invalid token" });
+  if (e.name === "TokenExpiredError") {
+    return res.status(401).json({ message: "Token expired" });
   }
+  return res.status(401).json({ message: "Invalid token" });
+}
 }
 
 module.exports = { requireAuth };
