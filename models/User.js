@@ -27,6 +27,15 @@ const userSchema = new mongoose.Schema(
       default: "local",
       enum: ["local"],
     },
+    // models/User.js (add inside schema)
+    profilePhotoUrl: { 
+      type: String, 
+      default: "", 
+    },
+    profilePhotoKey: { 
+      type: String, 
+      default: "", 
+    },
   },
   { timestamps: true }
 );
