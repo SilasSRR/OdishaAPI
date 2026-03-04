@@ -96,6 +96,33 @@ router.get("/", async (req, res) => {
   }
 });
 
+// -----------------------------
+// ✅ Completed list (cross-device)
+// -----------------------------
+router.get("/me/completed", requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || "50", 10), 100);
+
+    const docs = await CompletedVideo.find({ userId: req.userId })
+      .sort({ completedAt: -1, _id: -1 })
+      .limit(limit)
+      .lean();
+
+    // Return snapshot as `video` for easy FlatList usage
+    const items = docs.map((d) => ({
+      ...d.videoSnapshot,
+      completedAt: d.completedAt,
+      progressAtComplete: d.progressAtComplete,
+      _completedId: d._id,
+    }));
+
+    res.json({ items });
+  } catch (e) {
+    console.error("GET /api/videos/me/completed error:", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // GET /api/videos/:id (unchanged)
 router.get("/:id", async (req, res) => {
   try {
@@ -241,32 +268,7 @@ router.delete("/:id/complete", requireAuth, async (req, res) => {
   }
 });
 
-// -----------------------------
-// ✅ Completed list (cross-device)
-// -----------------------------
-router.get("/me/completed", requireAuth, async (req, res) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit || "50", 10), 100);
 
-    const docs = await CompletedVideo.find({ userId: req.userId })
-      .sort({ completedAt: -1, _id: -1 })
-      .limit(limit)
-      .lean();
-
-    // Return snapshot as `video` for easy FlatList usage
-    const items = docs.map((d) => ({
-      ...d.videoSnapshot,
-      completedAt: d.completedAt,
-      progressAtComplete: d.progressAtComplete,
-      _completedId: d._id,
-    }));
-
-    res.json({ items });
-  } catch (e) {
-    console.error("GET /api/videos/me/completed error:", e);
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
 // -----------------------------
 // ✅ Comments (discussion section)
