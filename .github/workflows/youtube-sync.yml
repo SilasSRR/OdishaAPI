@@ -1,0 +1,15 @@
+name: YouTube Sync Scheduler
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call backend sync endpoint
+        run: |
+          curl -X POST "${{ secrets.SYNC_URL }}" \
+          -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}"
