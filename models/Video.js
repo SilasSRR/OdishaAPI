@@ -6,7 +6,10 @@ const videoSchema = new mongoose.Schema(
     youtubeId: { type: String, required: true, trim: true, unique: true, index: true },
     category: { type: String, required: true, enum: ["QT", "Live", "Other"] },
 
-    // NEW: QT day grouping
+    // NEW
+    sourceChannelId: { type: String, default: "", index: true },
+
+    // QT day grouping
     qtDate: { type: String, default: "" }, // "YYYY-MM-DD"
 
     description: { type: String, default: "" },

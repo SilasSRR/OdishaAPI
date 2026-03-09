@@ -6,17 +6,15 @@ const Video = require("../models/Video");
 const API_KEY = process.env.YT_API_KEY;
 const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 
-const QT_CHANNEL_ID = process.env.YT_QT_CHANNEL_ID;        // QT channel
-const OTHER_CHANNEL_ID = process.env.YT_OTHER_CHANNEL_ID;  // Other channel
+const QT_CHANNEL_ID = process.env.YT_QT_CHANNEL_ID;
+const OTHER_CHANNEL_ID = process.env.YT_OTHER_CHANNEL_ID;
 
 if (!API_KEY || !MONGODB_URI || !QT_CHANNEL_ID || !OTHER_CHANNEL_ID) {
-  console.error(
-    "Missing env vars. Need YT_API_KEY, MONGODB_URI (or MONGO_URI), YT_QT_CHANNEL_ID, YT_OTHER_CHANNEL_ID"
-  );
+  console.error("Missing env vars: YT_API_KEY, MONGODB_URI/MONGO_URI, YT_QT_CHANNEL_ID, YT_OTHER_CHANNEL_ID");
   process.exit(1);
 }
 
-// ---------------- helpers ----------------
+
 function parseArgs() {
   const args = {};
   for (const part of process.argv.slice(2)) {
@@ -36,9 +34,7 @@ function yearRange(year) {
 async function ytFetchJson(url) {
   const res = await fetch(url);
   const data = await res.json();
-  if (!res.ok) {
-    throw new Error(`YouTube API error ${res.status}: ${JSON.stringify(data)}`);
-  }
+  if (!res.ok) throw new Error(`YouTube API error ${res.status}: ${JSON.stringify(data)}`);
   return data;
 }
 
@@ -67,25 +63,15 @@ function qtDateFromPublishedAt(publishedAtISO) {
   return String(publishedAtISO).slice(0, 10);
 }
 
-function isLiveLike(v) {
-  if (v?.liveStreamingDetails) return true;
-  const lbc = v?.snippet?.liveBroadcastContent;
+// SAFEST: only treat as Live if currently live/upcoming RIGHT NOW.
+// (We do NOT try to reclassify old videos as Live, because API signals are messy.)
+function isClearlyLiveNowFromSearchSnippet(snippet) {
+  const lbc = snippet?.liveBroadcastContent; // search.list snippet has this
   return lbc === "live" || lbc === "upcoming";
 }
 
-function isShortDurationISO(iso) {
-  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  const h = Number(m?.[1] || 0);
-  const min = Number(m?.[2] || 0);
-  const sec = Number(m?.[3] || 0);
-  const totalSec = h * 3600 + min * 60 + sec;
-  return totalSec > 0 && totalSec < 60;
-}
-
-// --------------- YouTube calls ---------------
-
-async function searchVideoIdsByDateRange({ channelId, start, end, maxPages }) {
-  const ids = [];
+async function searchItemsByDateRange({ channelId, start, end, maxPages }) {
+  const items = [];
   let pageToken = "";
   let pages = 0;
 
@@ -107,22 +93,30 @@ async function searchVideoIdsByDateRange({ channelId, start, end, maxPages }) {
 
     const data = await ytFetchJson(url);
 
-    for (const item of data.items || []) {
-      const vid = item?.id?.videoId;
-      if (vid) ids.push(vid);
+    for (const it of data.items || []) {
+      const vid = it?.id?.videoId;
+      if (vid) items.push({ videoId: vid, snippet: it.snippet || {} });
     }
 
     pageToken = data.nextPageToken;
     if (!pageToken) break;
   }
 
-  return Array.from(new Set(ids));
+  // de-dupe by id (keep first snippet)
+  const seen = new Set();
+  const uniq = [];
+  for (const it of items) {
+    if (seen.has(it.videoId)) continue;
+    seen.add(it.videoId);
+    uniq.push(it);
+  }
+  return uniq;
 }
 
 async function fetchVideoDetails(videoIds) {
   const url =
     `https://www.googleapis.com/youtube/v3/videos` +
-    `?part=snippet,contentDetails,liveStreamingDetails` +
+    `?part=snippet,contentDetails` +
     `&id=${encodeURIComponent(videoIds.join(","))}` +
     `&key=${encodeURIComponent(API_KEY)}`;
 
@@ -130,14 +124,19 @@ async function fetchVideoDetails(videoIds) {
   return data.items || [];
 }
 
-// --------------- main sync ---------------
+
 
 async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages }) {
   const { start, end } = yearRange(year);
 
   console.log(`\n=== Fetching year ${year} for channel ${channelId} ===`);
-  const ids = await searchVideoIdsByDateRange({ channelId, start, end, maxPages });
-  console.log(`Found ${ids.length} candidate video ids for year ${year}`);
+  const searchItems = await searchItemsByDateRange({ channelId, start, end, maxPages });
+  console.log(`Found ${searchItems.length} candidate video ids for year ${year}`);
+
+  // map id -> search snippet (for live/upcoming signal)
+  const searchSnippetById = new Map(searchItems.map((x) => [x.videoId, x.snippet]));
+
+  const ids = searchItems.map((x) => x.videoId);
 
   let upserted = 0;
 
@@ -147,40 +146,57 @@ async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages })
 
     for (const v of details) {
       const durISO = v?.contentDetails?.duration || "";
-      if (excludeShorts && durISO && isShortDurationISO(durISO)) continue;
 
       const duration = durISO ? iso8601ToHMS(durISO) : "";
-      const publishedAtISO = v?.snippet?.publishedAt || new Date().toISOString();
-      const live = isLiveLike(v);
 
-      let category = "QT";
-      let topic = "QT";
-
-      if (mode === "QT_LIVE_SPLIT") {
-        category = live ? "Live" : "QT";
-        topic = live ? "Live" : "QT";
-      } else if (mode === "OTHER") {
-        category = "Other";
-        topic = "Other";
+      // optional shorts exclusion
+      if (excludeShorts && durISO) {
+        const m = durISO.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        const h = Number(m?.[1] || 0);
+        const min = Number(m?.[2] || 0);
+        const sec = Number(m?.[3] || 0);
+        const totalSec = h * 3600 + min * 60 + sec;
+        if (totalSec > 0 && totalSec < 60) continue;
       }
 
-      const doc = {
+      const publishedAtISO = v?.snippet?.publishedAt || new Date().toISOString();
+
+
+      // Decide category ONLY FOR NEW INSERTS
+      let insertCategory = "QT";
+      let insertTopic = "QT";
+
+      if (mode === "QT_LIVE_SPLIT") {
+        const searchSnippet = searchSnippetById.get(v.id);
+        const liveNow = isClearlyLiveNowFromSearchSnippet(searchSnippet);
+        insertCategory = liveNow ? "Live" : "QT";
+        insertTopic = insertCategory;
+      } else if (mode === "OTHER") {
+        insertCategory = "Other";
+        insertTopic = "Other";
+      }
+
+      const setFields = {
         title: v?.snippet?.title || "",
         youtubeId: v?.id,
-        category,
+
         qtDate: qtDateFromPublishedAt(publishedAtISO),
         description: v?.snippet?.description || "",
-        topic,
+
         thumbnailUrl: pickThumb(v?.snippet),
         duration,
         publishedAt: new Date(publishedAtISO),
       };
 
-      if (!doc.youtubeId || !doc.title) continue;
+      if (!setFields.youtubeId || !setFields.title) continue;
 
+      // 🔒 Category/topic are locked on insert only
       await Video.updateOne(
-        { youtubeId: doc.youtubeId },
-        { $set: doc },
+        { youtubeId: setFields.youtubeId },
+        {
+          $set: setFields,
+          $setOnInsert: { category: insertCategory, topic: insertTopic },
+        },
         { upsert: true }
       );
 
@@ -188,7 +204,7 @@ async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages })
     }
   }
 
-  console.log(`Year ${year} done. Upserted: ${upserted}`);
+  console.log(`Year ${year} done. Upsert operations: ${upserted}`);
   return upserted;
 }
 
@@ -225,7 +241,7 @@ async function main() {
     });
   }
 
-  console.log(`\n✅ Sync finished. Total upserts: ${total}`);
+  console.log(`\n✅ Sync finished. Total upsert ops: ${total}`);
   await mongoose.disconnect();
   process.exit(0);
 }
@@ -234,8 +250,6 @@ main().catch(async (e) => {
   console.error("Sync failed:", e);
   try {
     await mongoose.disconnect();
-  } catch (e) {
-    console.error("Failed to disconnect from MongoDB:", e);
-  }
+  } catch {}
   process.exit(1);
 });
