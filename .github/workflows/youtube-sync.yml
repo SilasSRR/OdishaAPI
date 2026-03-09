@@ -2,8 +2,8 @@ name: YouTube Sync
 
 on:
   schedule:
-    # every 30 minutes UTC
-    - cron: "*/30 * * * *"
+    # every 10 minutes UTC
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
