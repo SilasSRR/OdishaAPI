@@ -12,6 +12,7 @@ const videosRoutes = require("./routes/videos");
 const qtRoutes = require("./routes/qt");
 const completedRoutes = require("./routes/completed");
 const bookmarkRoutes = require("./routes/bookmarks");
+const notificationRoutes = require("./routes/notifications");
 const path = require("path");
 
 const app = express();
@@ -65,6 +66,8 @@ app.use("/api/videos", videosRoutes);
 app.use("/api/qt", qtRoutes);
 app.use("/api/completed", completedRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
+
+app.use("/api/notifications", notificationRoutes);
 
 // Health check
 app.get('/', (req, res) => {
