@@ -1,3 +1,4 @@
+// routes/qt.js
 const express = require("express");
 const Video = require("../models/Video"); // match your filename
 const router = express.Router();
