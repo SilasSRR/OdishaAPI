@@ -1,4 +1,3 @@
-// models/User.js
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -17,6 +16,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, "Please enter a valid email address"],
     },
     passwordHash: {
       type: String,
@@ -27,14 +27,13 @@ const userSchema = new mongoose.Schema(
       default: "local",
       enum: ["local"],
     },
-    // models/User.js (add inside schema)
-    profilePhotoUrl: { 
-      type: String, 
-      default: "", 
+    profilePhotoUrl: {
+      type: String,
+      default: "",
     },
-    profilePhotoKey: { 
-      type: String, 
-      default: "", 
+    profilePhotoKey: {
+      type: String,
+      default: "",
     },
   },
   { timestamps: true }

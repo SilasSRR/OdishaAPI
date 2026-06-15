@@ -1,27 +1,24 @@
-// routes/auth.js
-const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const express = require("express");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 const { requireAuth } = require("../middleware/auth");
 const cloudinary = require("cloudinary").v2;
 
-const CompletedVideo = require("../models/CompletedVideo"); // adjust
-const Bookmark = require("../models/Bookmark");         // adjust
-const WatchProgress = require("../models/WatchProgress"); // adjust
-const VideoComment = require("../models/VideoComment"); // adjust
+const CompletedVideo = require("../models/CompletedVideo");
+const Bookmark = require("../models/Bookmark");
+const WatchProgress = require("../models/WatchProgress");
+const VideoComment = require("../models/VideoComment");
 
 const DeletedAccountLog = require("../models/DeletedAccountLog");
 
 const router = express.Router();
 
-
-// Helper to generate JWT
 function generateToken(user) {
   return jwt.sign(
     { userId: user._id, email: user.email },
     process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: "7d" }
   );
 }
 
@@ -31,30 +28,72 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function normalizeFullName(fullName) {
+  return String(fullName || "").trim().replace(/\s+/g, " ");
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+}
+
+function validatePassword(password) {
+  const pw = String(password || "");
+
+  if (pw.length < 8) {
+    return "Password must be at least 8 characters";
+  }
+
+  if (!/[A-Za-z]/.test(pw)) {
+    return "Password must include at least one letter";
+  }
+
+  if (!/\d/.test(pw)) {
+    return "Password must include at least one number";
+  }
+
+  return "";
+}
 
 // =====================
 //  EMAIL/PASSWORD AUTH
 // =====================
 
 // POST /api/auth/register
-router.post('/register', async (req, res) => {
+router.post("/register", async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
 
-    const fullNameNorm = String(fullName || "").trim().replace(/\s+/g, " ");
-    const emailNorm = String(email || "").trim().toLowerCase();
+    const fullNameNorm = normalizeFullName(fullName);
+    const emailNorm = normalizeEmail(email);
 
-    if (!fullName || !email || !password || password.length < 4) {
-      return res.status(400).json({ message: "Invalid name, email or password" });
+    if (fullNameNorm.length < 2) {
+      return res.status(400).json({ message: "Full name must be at least 2 characters" });
+    }
+
+    if (fullNameNorm.length > 80) {
+      return res.status(400).json({ message: "Full name must be 80 characters or less" });
+    }
+
+    if (!isValidEmail(emailNorm)) {
+      return res.status(400).json({ message: "Please enter a valid email address" });
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const existing = await User.findOne({ email: emailNorm });
     if (existing) {
-      return res.status(409).json({ message: 'Email already in use' });
+      return res.status(409).json({ message: "Email already in use" });
     }
 
     const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
+    const passwordHash = await bcrypt.hash(String(password), salt);
 
     const user = await User.create({
       fullName: fullNameNorm,
@@ -74,29 +113,37 @@ router.post('/register', async (req, res) => {
         provider: user.provider,
       },
     });
-
   } catch (err) {
-    console.error('Register error', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("Register error", err);
+
+    if (err?.code === 11000) {
+      return res.status(409).json({ message: "Email already in use" });
+    }
+
+    res.status(500).json({ message: "Server error" });
   }
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const emailNorm = String(email || "").trim().toLowerCase();
+    const emailNorm = normalizeEmail(email);
+
+    if (!isValidEmail(emailNorm) || !password) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
 
     const user = await User.findOne({ email: emailNorm });
 
     if (!user || !user.passwordHash) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    const isMatch = await bcrypt.compare(String(password), user.passwordHash);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const token = generateToken(user);
@@ -110,10 +157,9 @@ router.post('/login', async (req, res) => {
         provider: user.provider,
       },
     });
-
   } catch (err) {
-    console.error('Login error', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("Login error", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
@@ -122,8 +168,9 @@ router.post("/change-password", requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
 
-    if (!newPassword || String(newPassword).length < 6) {
-      return res.status(400).json({ message: "New password must be at least 6 characters" });
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const user = await User.findById(req.userId);
@@ -147,19 +194,17 @@ router.post("/change-password", requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/auth/me  (permanent delete + production audit log)
+// DELETE /api/auth/me
 router.delete("/me", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
 
-    // accept optional reason + metadata
     const reason = String(req.body?.reason || "").trim().slice(0, 300);
     const platform = String(req.body?.platform || "").trim().slice(0, 50);
 
     const user = await User.findById(userId).select("profilePhotoKey fullName email");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // 0) write deletion log FIRST (so even if later steps fail, you still have audit trail)
     await DeletedAccountLog.create({
       userId,
       email: user.email || "",
@@ -167,29 +212,25 @@ router.delete("/me", requireAuth, async (req, res) => {
       reason,
       platform,
       userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
-      ip:
-        String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "")
-          .split(",")[0]
-          .trim()
-          .slice(0, 80),
+      ip: String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "")
+        .split(",")[0]
+        .trim()
+        .slice(0, 80),
       deletedAt: new Date(),
     });
 
-    // 1) delete cloudinary profile image
     if (user.profilePhotoKey) {
       try {
         await cloudinary.uploader.destroy(user.profilePhotoKey);
-      } catch { }
+      } catch {}
     }
 
-    // 2) delete private per-user data
     await Promise.allSettled([
       Bookmark.deleteMany({ userId }),
       CompletedVideo.deleteMany({ userId }),
       WatchProgress.deleteMany({ userId }),
     ]);
 
-    // 3) anonymize public comments (keep comment text; userId stays because required)
     await VideoComment.updateMany(
       { userId },
       {
@@ -200,7 +241,6 @@ router.delete("/me", requireAuth, async (req, res) => {
       }
     );
 
-    // 4) delete user
     await User.deleteOne({ _id: userId });
 
     return res.json({ ok: true });
@@ -210,11 +250,13 @@ router.delete("/me", requireAuth, async (req, res) => {
   }
 });
 
-
 // GET /api/auth/me
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select("_id email provider fullName profilePhotoUrl");
+    const user = await User.findById(req.userId).select(
+      "_id email provider fullName profilePhotoUrl"
+    );
+
     if (!user) return res.status(401).json({ message: "User not found" });
 
     res.json({
@@ -226,18 +268,16 @@ router.get("/me", requireAuth, async (req, res) => {
         profilePhotoUrl: user.profilePhotoUrl || "",
       },
     });
-
+    
   } catch (err) {
     console.error("Me error", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// =====================
-//     GOOGLE AUTH
-// =====================
 
-// POST /api/auth/google
-// (Removed Google auth routes as per recent edits)
+
+
+
 
 module.exports = router;
