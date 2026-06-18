@@ -18,7 +18,12 @@ const videoSchema = new mongoose.Schema(
     thumbnailUrl: { type: String, default: "" },
     duration: { type: String, default: "" },
     publishedAt: { type: Date, required: true, default: Date.now },
+    notificationSentAt: {
+      type: Date,
+      default: null,
+    },
   },
+
   { timestamps: true }
 );
 

@@ -1,7 +1,8 @@
-/* scripts/syncYoutubeByYears.js */
 require("dotenv").config();
+
 const mongoose = require("mongoose");
 const Video = require("../models/Video");
+const { sendDailyQtNotification } = require("../services/pushNotifications");
 
 const API_KEY = process.env.YT_API_KEY;
 const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
@@ -9,25 +10,12 @@ const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 const QT_CHANNEL_ID = process.env.YT_QT_CHANNEL_ID;
 const OTHER_CHANNEL_ID = process.env.YT_OTHER_CHANNEL_ID;
 
-const { sendDailyQtNotification } = require("../services/pushNotifications");
-
 if (!API_KEY || !MONGODB_URI || !QT_CHANNEL_ID || !OTHER_CHANNEL_ID) {
-  console.error("Missing env vars: YT_API_KEY, MONGODB_URI/MONGO_URI, YT_QT_CHANNEL_ID, YT_OTHER_CHANNEL_ID");
+  console.error(
+    "Missing env vars: YT_API_KEY, MONGODB_URI/MONGO_URI, YT_QT_CHANNEL_ID, YT_OTHER_CHANNEL_ID"
+  );
   process.exit(1);
 }
-
-function getNepalTodayYYYYMMDD() {
-  const now = new Date();
-  const nepalMs = now.getTime() + (5 * 60 + 45) * 60 * 1000;
-  const nepal = new Date(nepalMs);
-
-  const y = nepal.getUTCFullYear();
-  const m = String(nepal.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(nepal.getUTCDate()).padStart(2, "0");
-
-  return `${y}-${m}-${d}`;
-}
-
 
 function parseArgs() {
   const args = {};
@@ -48,18 +36,25 @@ function yearRange(year) {
 async function ytFetchJson(url) {
   const res = await fetch(url);
   const data = await res.json();
-  if (!res.ok) throw new Error(`YouTube API error ${res.status}: ${JSON.stringify(data)}`);
+
+  if (!res.ok) {
+    throw new Error(`YouTube API error ${res.status}: ${JSON.stringify(data)}`);
+  }
+
   return data;
 }
 
 function iso8601ToHMS(iso) {
   const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+
   const h = Number(m?.[1] || 0);
   const min = Number(m?.[2] || 0);
   const s = Number(m?.[3] || 0);
+
   const HH = String(h).padStart(2, "0");
   const MM = String(min).padStart(2, "0");
   const SS = String(s).padStart(2, "0");
+
   return h > 0 ? `${HH}:${MM}:${SS}` : `${MM}:${SS}`;
 }
 
@@ -77,10 +72,8 @@ function qtDateFromPublishedAt(publishedAtISO) {
   return String(publishedAtISO).slice(0, 10);
 }
 
-// SAFEST: only treat as Live if currently live/upcoming RIGHT NOW.
-// (We do NOT try to reclassify old videos as Live, because API signals are messy.)
 function isClearlyLiveNowFromSearchSnippet(snippet) {
-  const lbc = snippet?.liveBroadcastContent; // search.list snippet has this
+  const lbc = snippet?.liveBroadcastContent;
   return lbc === "live" || lbc === "upcoming";
 }
 
@@ -109,21 +102,27 @@ async function searchItemsByDateRange({ channelId, start, end, maxPages }) {
 
     for (const it of data.items || []) {
       const vid = it?.id?.videoId;
-      if (vid) items.push({ videoId: vid, snippet: it.snippet || {} });
+      if (vid) {
+        items.push({
+          videoId: vid,
+          snippet: it.snippet || {},
+        });
+      }
     }
 
     pageToken = data.nextPageToken;
     if (!pageToken) break;
   }
 
-  // de-dupe by id (keep first snippet)
   const seen = new Set();
   const uniq = [];
+
   for (const it of items) {
     if (seen.has(it.videoId)) continue;
     seen.add(it.videoId);
     uniq.push(it);
   }
+
   return uniq;
 }
 
@@ -138,24 +137,58 @@ async function fetchVideoDetails(videoIds) {
   return data.items || [];
 }
 
+async function notifyLatestNewQtVideo(newQtVideos) {
+  if (!Array.isArray(newQtVideos) || newQtVideos.length === 0) return;
 
+  const latest = [...newQtVideos].sort(
+    (a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)
+  )[0];
+
+  if (!latest?._id) return;
+
+  const fresh = await Video.findOne({
+    _id: latest._id,
+    category: "QT",
+    notificationSentAt: null,
+  }).lean();
+
+  if (!fresh) {
+    console.log("[PUSH] QT notification already sent or video not found.");
+    return;
+  }
+
+  console.log("[PUSH] Sending Daily QT notification:", fresh.title);
+
+  await sendDailyQtNotification(fresh);
+
+  await Video.updateOne(
+    { _id: fresh._id, notificationSentAt: null },
+    { $set: { notificationSentAt: new Date() } }
+  );
+
+  console.log("[PUSH] Daily QT notification marked as sent:", fresh._id.toString());
+}
 
 async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages }) {
   const { start, end } = yearRange(year);
 
   console.log(`\n=== Fetching year ${year} for channel ${channelId} ===`);
-  const searchItems = await searchItemsByDateRange({ channelId, start, end, maxPages });
+
+  const searchItems = await searchItemsByDateRange({
+    channelId,
+    start,
+    end,
+    maxPages,
+  });
+
   console.log(`Found ${searchItems.length} candidate video ids for year ${year}`);
 
-  // map id -> search snippet (for live/upcoming signal)
   const searchSnippetById = new Map(searchItems.map((x) => [x.videoId, x.snippet]));
 
   const ids = searchItems.map((x) => x.videoId);
 
-  const newTodayQtVideos = [];
-  const nepalToday = getNepalTodayYYYYMMDD();
-
   let upserted = 0;
+  const newQtVideos = [];
 
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50);
@@ -163,29 +196,27 @@ async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages })
 
     for (const v of details) {
       const durISO = v?.contentDetails?.duration || "";
-
       const duration = durISO ? iso8601ToHMS(durISO) : "";
 
-      // optional shorts exclusion
       if (excludeShorts && durISO) {
         const m = durISO.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
         const h = Number(m?.[1] || 0);
         const min = Number(m?.[2] || 0);
         const sec = Number(m?.[3] || 0);
         const totalSec = h * 3600 + min * 60 + sec;
+
         if (totalSec > 0 && totalSec < 60) continue;
       }
 
       const publishedAtISO = v?.snippet?.publishedAt || new Date().toISOString();
 
-
-      // Decide category ONLY FOR NEW INSERTS
       let insertCategory = "QT";
       let insertTopic = "QT";
 
       if (mode === "QT_LIVE_SPLIT") {
         const searchSnippet = searchSnippetById.get(v.id);
         const liveNow = isClearlyLiveNowFromSearchSnippet(searchSnippet);
+
         insertCategory = liveNow ? "Live" : "QT";
         insertTopic = insertCategory;
       } else if (mode === "OTHER") {
@@ -196,10 +227,8 @@ async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages })
       const setFields = {
         title: v?.snippet?.title || "",
         youtubeId: v?.id,
-
         qtDate: qtDateFromPublishedAt(publishedAtISO),
         description: v?.snippet?.description || "",
-
         thumbnailUrl: pickThumb(v?.snippet),
         duration,
         publishedAt: new Date(publishedAtISO),
@@ -207,42 +236,37 @@ async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages })
 
       if (!setFields.youtubeId || !setFields.title) continue;
 
-      // 🔒 Category/topic are locked on insert only
       const result = await Video.updateOne(
         { youtubeId: setFields.youtubeId },
         {
           $set: setFields,
-          $setOnInsert: { category: insertCategory, topic: insertTopic },
+          $setOnInsert: {
+            category: insertCategory,
+            topic: insertTopic,
+            notificationSentAt: null,
+          },
         },
         { upsert: true }
       );
 
-      if (
-        result.upsertedCount > 0 &&
-        insertCategory === "QT" &&
-        setFields.qtDate === nepalToday
-      ) {
+      upserted += 1;
+
+      if (result.upsertedCount > 0 && insertCategory === "QT") {
         const insertedVideo = await Video.findOne({
           youtubeId: setFields.youtubeId,
+          category: "QT",
+          notificationSentAt: null,
         }).lean();
 
         if (insertedVideo) {
-          newTodayQtVideos.push(insertedVideo);
+          newQtVideos.push(insertedVideo);
+          console.log("[PUSH] New QT queued for notification:", insertedVideo.title);
         }
       }
-
-      upserted += 1;
     }
   }
 
-  if (newTodayQtVideos.length > 0) {
-    const latest = newTodayQtVideos.sort(
-      (a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)
-    )[0];
-
-    console.log("[PUSH] Sending Daily QT notification:", latest.title);
-    await sendDailyQtNotification(latest);
-  }
+  await notifyLatestNewQtVideo(newQtVideos);
 
   console.log(`Year ${year} done. Upsert operations: ${upserted}`);
   return upserted;
@@ -250,6 +274,7 @@ async function upsertForYear({ year, channelId, mode, excludeShorts, maxPages })
 
 async function main() {
   const args = parseArgs();
+
   const years = String(args.years || "2026")
     .split(",")
     .map((s) => s.trim())
@@ -282,14 +307,17 @@ async function main() {
   }
 
   console.log(`\n✅ Sync finished. Total upsert ops: ${total}`);
+
   await mongoose.disconnect();
   process.exit(0);
 }
 
 main().catch(async (e) => {
   console.error("Sync failed:", e);
+
   try {
     await mongoose.disconnect();
   } catch { }
+
   process.exit(1);
 });
